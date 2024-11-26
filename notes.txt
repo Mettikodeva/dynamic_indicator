@@ -1,0 +1,13 @@
+trigger:
+1. sein kiri dan kanan
+2. rem?
+3. hazard 3 mode:
+    - hazard dynamic indicator biasa
+    - breathing
+    - strobe
+
+
+note:
+DRL welcome scanning
+breathing DVI
+

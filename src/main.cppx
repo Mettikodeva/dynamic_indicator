@@ -1,0 +1,190 @@
+#include <Arduino.h>
+#include <FastLED.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
+
+// How many leds are in the strip?
+#define NUM_LEDS 40
+#define NUM_LEDS2 30
+#define NUM_LEDS3 10
+
+// For led chips like WS2812, which have a data line, ground, and power, you just
+// need to define DATA_PIN.  For led chipsets that are SPI based (four wires - data, clock,
+// ground, and power), like the LPD8806 define both DATA_PIN and CLOCK_PIN
+// Clock pin only needed for SPI based chipsets when not using hardware SPI
+#define DATA_PIN 2
+// #define DATA_PIN2 4
+
+#define DATA_PIN3 16
+// #define DATA_PIN4 17
+
+#define DATA_PIN5 5
+#define DATA_PIN6 18
+
+CRGB leds[NUM_LEDS];
+CRGB leds2[NUM_LEDS];
+// CRGB leds3[NUM_LEDS2];
+// CRGB leds4[NUM_LEDS2];
+// CRGB leds5[NUM_LEDS3];
+// CRGB leds6[NUM_LEDS3];
+
+
+int counterl = NUM_LEDS;
+int counterr = NUM_LEDS;
+
+bool state_l = false;
+bool state_r = false;
+
+void setup()
+{
+  // put your setup code here, to run once:
+  delay(1000);
+  Serial.begin(115200);
+
+
+  pinMode(DATA_PIN, OUTPUT);
+  // pinMode(DATA_PIN2, OUTPUT);
+  pinMode(DATA_PIN3, OUTPUT);
+  // pinMode(DATA_PIN4, OUTPUT);
+  pinMode(DATA_PIN5, OUTPUT);
+  // pinMode(DATA_PIN6, OUTPUT);
+  FastLED.addLeds<WS2812, DATA_PIN, RGB>(leds, NUM_LEDS);
+  FastLED.addLeds<WS2812, DATA_PIN3, RGB>(leds2, NUM_LEDS);
+  // FastLED3.addLeds<WS2812, DATA_PIN5, RGB>(leds5, NUM_LEDS3);
+  // FastLED3.addLeds<WS2812, DATA_PIN6, RGB>(leds6, NUM_LEDS3);
+  pinMode(12, INPUT_PULLUP);
+  pinMode(13, INPUT_PULLUP);
+  pinMode(14, INPUT_PULLUP);
+
+}
+
+TaskHandle_t TaskHandle_L = NULL;
+TaskHandle_t TaskHandle_R = NULL;
+
+void signalL(void *pvParameters)
+{
+  for (;;){
+    // shifting
+    leds[counterl] = CRGB::Yellow;
+    // leds3[int(counterl * NUM_LEDS2 / NUM_LEDS)] = CRGB::Yellow;
+    // leds5[int(counterl * NUM_LEDS3 / NUM_LEDS)] = CRGB::Yellow;
+
+    counterl--;
+    if(counterl < 0) {
+      for (int i = 0; i < NUM_LEDS - 1;i++){
+        leds[i] = CRGB::Black;
+        // leds3[int(i * NUM_LEDS2 / NUM_LEDS)] = CRGB::Black;
+        // leds5[int(i * NUM_LEDS3 / NUM_LEDS)] = CRGB::Black;
+      }
+      counterl = NUM_LEDS - 1;
+    }
+    vTaskDelay(50);
+  }
+  state_l = false;
+  vTaskDelete(NULL);
+}
+void signalR(void *pvParameters) {
+  for (;;){
+    // shifting
+    leds2[counterr] = CRGB::Yellow;
+    // leds4[int(counterl * NUM_LEDS2 / NUM_LEDS)] = CRGB::Yellow;
+    // leds6[int(counterl * NUM_LEDS3 / NUM_LEDS)] = CRGB::Yellow;
+    counterr--;
+    if(counterr < 0) {
+      for (int i = 0; i < NUM_LEDS - 1;i++){
+        leds2[i] = CRGB::Black;
+        // leds4[int(i * NUM_LEDS2 / NUM_LEDS)] = CRGB::Black;
+        // leds6[int(i * NUM_LEDS3 / NUM_LEDS)] = CRGB::Black;
+      }
+      
+      counterr = NUM_LEDS-1;    
+    }
+    vTaskDelay(50);
+  }
+  state_r = false;
+  vTaskDelete(NULL);
+}
+
+TickType_t lastTick = 0;
+int state = 0; // 0 = off, 1 = right, 2 = left
+void loop() {
+  Serial.print((xTaskGetTickCount())/portTICK_PERIOD_MS);
+  Serial.print("\t");
+  Serial.println((lastTick)/portTICK_PERIOD_MS);
+  // Serial.println((lastTick)/portTICK_PERIOD_MS);
+
+  if (digitalRead(13) == LOW)
+  {
+    lastTick = xTaskGetTickCount();
+    if(TaskHandle_L == NULL)
+      xTaskCreate(signalL, "sen kiri", 2048, NULL, 1, &TaskHandle_L);
+    
+    if(state==2){
+      vTaskDelete(TaskHandle_R);
+    }
+    state = 1;
+    vTaskDelay(200);
+  }
+  if(digitalRead(12) == LOW) {
+    lastTick = xTaskGetTickCount();
+    if(TaskHandle_R == NULL)
+      xTaskCreate(signalR, "sen kanan", 2048, NULL, 1, &TaskHandle_R);
+    if(state==1){
+      vTaskDelete(TaskHandle_L);
+    }
+    state = 2;
+    vTaskDelay(200);
+  }
+  if (digitalRead(14) == LOW){
+    lastTick = xTaskGetTickCount();
+    
+    if(TaskHandle_R != NULL){
+      vTaskDelete(TaskHandle_R);
+    }
+    if(TaskHandle_L != NULL){
+      vTaskDelete(TaskHandle_L);
+    }
+    vTaskDelay(2);
+    xTaskCreate(signalR, "sen kanan", 2048, NULL, 1, &TaskHandle_R);
+    xTaskCreate(signalL, "sen kiri", 2048, NULL, 1, &TaskHandle_L);
+    state = 3;
+    vTaskDelay(200);
+  }
+
+  if((xTaskGetTickCount() - lastTick)/portTICK_PERIOD_MS  > 3000 && state != 0) {
+    Serial.println("delete");
+    if (state == 1)
+    {
+      // vTaskSuspend(TaskHandle_L);
+      for (int i = 0; i < NUM_LEDS - 1;i++)
+        leds[i] = CRGB::Black;
+      vTaskDelete(TaskHandle_L);
+      TaskHandle_L = NULL;
+    }
+    else if (state == 2){
+      // vTaskSuspend(TaskHandle_R);
+      for (int i = 0; i < NUM_LEDS - 1;i++)
+        leds2[i] = CRGB::Black;
+      vTaskDelete(TaskHandle_R);
+      TaskHandle_R = NULL;
+
+    }
+    if(state == 3){
+      for (int i = 0; i < NUM_LEDS - 1;i++)
+        leds[i] = CRGB::Black;
+      vTaskDelete(TaskHandle_L);
+      TaskHandle_L = NULL;
+      for (int i = 0; i < NUM_LEDS - 1;i++)
+        leds2[i] = CRGB::Black;
+      vTaskDelete(TaskHandle_R);
+      TaskHandle_R = NULL;
+    }
+    lastTick = xTaskGetTickCount();
+    state = 0;
+  }
+
+  vTaskDelay(50);
+  FastLED.show();
+  // FastLED2.show();
+}

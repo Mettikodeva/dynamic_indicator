@@ -1,0 +1,1130 @@
+// #include "animation.h"
+// #pragma once
+#include <stdio.h>
+#include <Arduino.h>
+#include <FastLED.h>
+#include "OneButton.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
+// For led chips like WS2812, which have a data line, ground, and power, you just
+// need to define DATA_PIN.  For led chipsets that are SPI based (four wires - data, clock,
+// ground, and power), like the LPD8806 define both DATA_PIN and CLOCK_PIN
+// Clock pin only needed for SPI based chipsets when not using hardware SPI
+
+///////////////////////////////////////////////////
+////// USER EDITABLE SECTION //////////////////////
+#define BRIGHTNESS 50
+// How many leds are in the strip?
+#define NUM_LEDS 30 
+#define NUM_LEDS2 20
+#define NUM_LEDS3 20
+#define DATA_PIN 2
+#define DATA_PIN_SIGNAL 16
+#define DATA_PIN_BACK 5
+
+#define CITY_LIGHT_PIN 27
+#define SIGNAL_LEFT_PIN 13
+#define SIGNAL_RIGHT_PIN 18
+#define SIGNAL_HAZARD_PIN 14
+#define BRAKE_PIN 15
+#define SIGNAL_COLOR CRGB::Orange
+#define WelcomeLightSpeed 80
+#define ByeSpeed 40
+#define FPS 240
+
+
+#define DELAY_STROBE 300
+#define FADE_STROBE 250
+// BREATHE animation
+#define smoothness 150.0
+#define range 250
+
+
+////// END USER EDITABLE SECTION //////////////////
+///////////////////////////////////////////////////
+const static int NUM_LEDS_2 = (int)(NUM_LEDS/2);
+const static int NUM_LEDS2_2 = (int)(NUM_LEDS2/2);  
+const static int NUM_LEDS3_2 = (int)(NUM_LEDS3/2);
+
+const static int NUM_LEDS_4 = (int)(NUM_LEDS/4);
+const static int NUM_LEDS2_4 = (int)(NUM_LEDS2/4);
+const static int NUM_LEDS3_4 = (int)(NUM_LEDS3/4);
+
+static CRGBArray<NUM_LEDS> leds;
+static CRGBArray<NUM_LEDS2> leds2;
+static CRGBArray<NUM_LEDS3> leds3;
+
+typedef enum SignalState_t{
+  OFF,
+  ON,
+  BREATHE,
+  STROBE
+} SignalState_t;
+
+SignalState_t hazard_signal_state = OFF;
+
+int counterl = NUM_LEDS;
+int counterr = NUM_LEDS;
+
+SignalState_t state_l = OFF;
+SignalState_t state_r = OFF;
+SignalState_t state_DRL = OFF;
+static bool state_brake = false;
+bool animating = false;
+
+TaskHandle_t signalLeftTask;
+TaskHandle_t hazardSignalTask;
+TaskHandle_t updateLedsTask;
+
+OneButton button(SIGNAL_HAZARD_PIN, true, true);
+OneButton button2(SIGNAL_LEFT_PIN, true, true);
+OneButton button3(SIGNAL_RIGHT_PIN, true, true);
+OneButton button_DRL(CITY_LIGHT_PIN, true, true);
+OneButton button_brake(BRAKE_PIN, true, true);
+
+TickType_t lastPress = 0;
+
+
+float myabs(float x){
+    if(x < 0){
+        return -1*x;
+    }
+    return x;
+}
+
+const char *TAG = "TEST";
+
+void welcomeLightScanning(){
+  printf("welcomeLightScanning\n");
+  animating = true;
+  // scanning one pixel both directions to center of the strip then back to outer edges
+  for (int i = 0; i < NUM_LEDS_2; i++)
+  {
+    leds[i] = CRGB::Gray;
+    leds[NUM_LEDS - i - 1] = CRGB::Gray;
+    leds[i-1] = CRGB::Black;
+    leds[NUM_LEDS - i] = CRGB::Black;
+    if (i < NUM_LEDS2_2)
+    {
+      leds2[i] = CRGB::Gray;
+      leds2[NUM_LEDS2 - i - 1] = CRGB::Gray;
+      leds2[i-1] = CRGB::Black;
+      leds2[NUM_LEDS2 - i] = CRGB::Black;
+    }
+    if (i < NUM_LEDS3_2 && !state_brake)
+    {
+      leds3[i] = CRGB::Gray;
+      leds3[NUM_LEDS3 - i - 1] = CRGB::Gray;
+      leds3[i-1] = CRGB::Black;
+      leds3[NUM_LEDS3 - i] = CRGB::Black;
+    }
+    FastLED.show();
+    vTaskDelay(WelcomeLightSpeed / portTICK_PERIOD_MS);
+  }
+  // reverse direction
+  for(int i = NUM_LEDS_2; i > 0; i--){
+    leds[i] = CRGB::Gray;
+    leds[NUM_LEDS - i + 1 ] = CRGB::Gray;
+    leds[NUM_LEDS - i] = CRGB::Black;
+    leds[i+1] = CRGB::Black; 
+    if(i < NUM_LEDS2_2){
+      leds2[i] = CRGB::Gray;
+      leds2[NUM_LEDS2 - i - 1] = CRGB::Gray;
+      leds2[NUM_LEDS2 - i ] = CRGB::Black;
+      leds2[i+1] = CRGB::Black;
+    }
+    if(i < NUM_LEDS3_2 && !state_brake){
+      leds3[i] = CRGB::Gray;
+      leds3[NUM_LEDS3 - i - 1] = CRGB::Gray;
+      leds3[NUM_LEDS3 - i ] = CRGB::Black;
+      leds3[i+1] = CRGB::Black;
+    }
+    FastLED.show();
+    vTaskDelay(WelcomeLightSpeed / portTICK_PERIOD_MS);
+  }
+  for (int i = 0; i < NUM_LEDS_2; i++)
+  {
+    leds[i] = CRGB::Gray;
+    leds[NUM_LEDS - i - 1] = CRGB::Gray;
+    if (i < NUM_LEDS2_2)
+    {
+      leds2[i] = CRGB::Gray;
+      leds2[NUM_LEDS2 - i - 1] = CRGB::Gray;
+    }
+    if (i < NUM_LEDS3_2 && !state_brake)
+    {
+      leds3[i] = CRGB::Gray;
+      leds3[NUM_LEDS3 - i - 1] = CRGB::Gray;
+    }
+    FastLED.show();
+    vTaskDelay(WelcomeLightSpeed / portTICK_PERIOD_MS);
+  }
+  for(int i = NUM_LEDS_2; i > 0; i--){
+    leds[i] = CRGB::White;
+    leds[NUM_LEDS - i + 1 ] = CRGB::White;
+    if(i < NUM_LEDS2_2){
+      leds2[i] = CRGB::White;
+      leds2[NUM_LEDS2 - i - 1] = CRGB::White;
+    }
+    if(i < NUM_LEDS3_2 && !state_brake){
+      leds3[i] = CRGB::White;
+      leds3[NUM_LEDS3 - i - 1] = CRGB::White;
+    }
+    FastLED.show();
+    vTaskDelay(WelcomeLightSpeed / portTICK_PERIOD_MS);
+  }
+  animating = false;
+}
+
+void signalLeft(void *arg){
+  SignalState_t prev_state = OFF;
+  for (;;){
+    if(animating){
+      vTaskDelay(50 / portTICK_PERIOD_MS);
+      continue;
+    }
+    if(hazard_signal_state == OFF && state_l == ON){
+      printf("Signal Left\n");
+      for (int i = 0; i < (int)(NUM_LEDS_2); i++){
+        leds[(int)(NUM_LEDS_2)-1-i] = SIGNAL_COLOR; 
+        if (i < NUM_LEDS2_2){
+          leds2[(int)(NUM_LEDS2_2)-1-i] = SIGNAL_COLOR;
+        }
+        if(i<NUM_LEDS3_2 && !state_brake){
+          leds3[(int)(NUM_LEDS2_2)-1-i] = SIGNAL_COLOR; 
+        }
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+      }
+      for(int j = 1; j <= 10; j++){
+        for (int i = 0; i < (int)(NUM_LEDS_2); i++){
+          leds[i].fadeToBlackBy(10*j);
+          if (i < NUM_LEDS2_2){
+            leds2[i].fadeToBlackBy(10*j);
+          }
+          if(i<NUM_LEDS3_2 && !state_brake){
+            leds3[i].fadeToBlackBy(10*j);
+          }
+        }
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+      }
+    }
+    else if(hazard_signal_state == OFF && state_l == OFF && state_DRL == OFF){
+      for (int i = 0; i < (int)(NUM_LEDS_2); i++){
+        leds[(int)(NUM_LEDS_2)-1-i] = CRGB::Black; 
+        if (i < NUM_LEDS2_2){
+          leds2[(int)(NUM_LEDS2_2)-1-i] = CRGB::Black;
+        }
+        if(i<NUM_LEDS3_2 && !state_brake){
+          leds3[(int)(NUM_LEDS3_2)-1-i] = CRGB::Black; 
+        }
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+      }
+    }
+    prev_state = state_l;
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+  }
+  vTaskDelete(NULL);
+}
+
+void signalRight(void *arg){
+  for (;;){
+    if(animating){
+      vTaskDelay(50 / portTICK_PERIOD_MS);
+      continue;
+    }
+    if(hazard_signal_state == OFF && state_r == ON){
+      printf("Signal Right\n");
+      for (int i = 0; i < (int)(NUM_LEDS_2); i++){
+        leds[(int)(NUM_LEDS_2)+i] = SIGNAL_COLOR; 
+        if (i < NUM_LEDS2_2){
+          leds2[(int)(NUM_LEDS2_2)+i] = SIGNAL_COLOR;
+        }
+        if(i<NUM_LEDS3_2 && !state_brake){
+          leds3[(int)(NUM_LEDS2_2)+i] = SIGNAL_COLOR; 
+        }
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+      }
+      for(int j = 1; j <= 10; j++){
+        for (int i = 0; i < NUM_LEDS_2; i++){
+          leds[NUM_LEDS_2 + i].fadeToBlackBy(10*j);
+          if (i < NUM_LEDS2_2){
+            leds2[NUM_LEDS2_2 + i].fadeToBlackBy(10*j);
+          }
+          if(i<NUM_LEDS3_2 && !state_brake){
+            leds3[NUM_LEDS3_2 + i].fadeToBlackBy(10*j);
+          }
+        }
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+      }
+    }
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+  }
+  vTaskDelete(NULL);
+}
+
+void hazardSignal(void *arg){
+  for (;;){
+    TickType_t now = xTaskGetTickCount();
+    if (hazard_signal_state == ON){
+      for (int i = 0; i < (int)(NUM_LEDS_2); i++){
+        leds[(int)(NUM_LEDS_2)-1-i] = SIGNAL_COLOR; 
+        leds[(int)(NUM_LEDS_2)+i] = SIGNAL_COLOR; 
+        if (i < NUM_LEDS2_2){
+          leds2[(int)(NUM_LEDS2_2)-1-i] = SIGNAL_COLOR;
+          leds2[(int)(NUM_LEDS2_2)+i] = SIGNAL_COLOR;
+        }
+        if(i < NUM_LEDS3_2 && !state_brake){
+          leds3[(int)(NUM_LEDS3_2)-1-i] = SIGNAL_COLOR;
+          leds3[(int)(NUM_LEDS3_2)+i] = SIGNAL_COLOR;
+        }
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+      }
+      for (int i = 0; i < NUM_LEDS; i++){
+        leds.fadeToBlackBy(10*i);
+        leds2.fadeToBlackBy(10*i);
+        if (!state_brake){
+          leds3.fadeToBlackBy(10*i);
+        }
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+      }
+    }
+    else if(hazard_signal_state == STROBE){
+      // for(int i = 0; i < (int)(NUM_LEDS2_4); i++){
+      //   leds2[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue; 
+      //   leds2[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   if(!state_brake){
+      //     leds3[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue;
+      //     leds3[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   }
+      // }
+      // leds2.fadeToBlackBy(150);
+      // if(!state_brake){
+      //   leds3.fadeToBlackBy(150);
+      // }
+      // FastLED.show();
+      // vTaskDelay(150/ portTICK_PERIOD_MS);
+      // for(int i = 0; i < (int)(NUM_LEDS2_4); i++){
+      //   leds2[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue; 
+      //   leds2[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   if(!state_brake){
+      //     leds3[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue;
+      //     leds3[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   }
+      // }
+      // FastLED.show();
+      // vTaskDelay(150/ portTICK_PERIOD_MS);
+      // for(int i = 0; i < (int)(NUM_LEDS2_4); i++){
+      //   leds2[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue; 
+      //   leds2[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   if(!state_brake){
+      //     leds3[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue;
+      //     leds3[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   }
+      // }
+      // leds2.fadeToBlackBy(150);
+      // if(!state_brake){
+      //   leds3.fadeToBlackBy(150);
+      // }
+      // FastLED.show();
+      // vTaskDelay(150/ portTICK_PERIOD_MS);
+      // for(int i = 0; i < (int)(NUM_LEDS2_4); i++){
+      //   leds2[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue; 
+      //   leds2[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   if(!state_brake){
+      //     leds3[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue;
+      //     leds3[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   }
+      // }
+      // FastLED.show();
+      // vTaskDelay(150/ portTICK_PERIOD_MS);
+      // // white inside
+      // for(int i = 0; i < (int)(NUM_LEDS2_4); i++){
+      //   leds2[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue; 
+      //   leds2[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   if(!state_brake){
+      //     leds3[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue;
+      //     leds3[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   }
+      // }
+      // leds2.fadeToBlackBy(150);
+      // if(!state_brake){
+      //   leds3.fadeToBlackBy(150);
+      // }
+      // FastLED.show();
+      // vTaskDelay(150/ portTICK_PERIOD_MS);
+      // for(int i = 0; i < (int)(NUM_LEDS2_4); i++){
+      //   leds2[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //   if(!state_brake){
+      //     leds3[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //   }
+      // }
+      // FastLED.show();
+      // vTaskDelay(150/ portTICK_PERIOD_MS);
+      // for(int i = 0; i < (int)(NUM_LEDS2_4); i++){
+      //   leds2[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue; 
+      //   leds2[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   if(!state_brake){
+      //     leds3[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue;
+      //     leds3[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   }
+      // }
+      // leds2.fadeToBlackBy(150);
+      // if(!state_brake){
+      //   leds3.fadeToBlackBy(150);
+      // }
+      // FastLED.show();
+      // vTaskDelay(150/ portTICK_PERIOD_MS);
+      // for(int i = 0; i < (int)(NUM_LEDS2_4); i++){
+      //   leds2[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //   if(!state_brake){
+      //     leds3[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //   }
+      // }
+      // FastLED.show();
+      // vTaskDelay(150/ portTICK_PERIOD_MS);
+
+      // // both
+      // for(int i = 0; i < (int)(NUM_LEDS2_4); i++){
+      //   leds2[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue; 
+      //   leds2[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   if(!state_brake){
+      //     leds3[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue;
+      //     leds3[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   }
+      // }
+      // leds2.fadeToBlackBy(150);
+      // if(!state_brake){
+      //   leds3.fadeToBlackBy(150);
+      // }
+      // FastLED.show();
+      // vTaskDelay(150/ portTICK_PERIOD_MS);
+      // for(int i = 0; i < (int)(NUM_LEDS2_4); i++){
+      //   leds2[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue; 
+      //   leds2[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   if(!state_brake){
+      //     leds3[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue;
+      //     leds3[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   }
+      // }
+      // FastLED.show();
+      // vTaskDelay(150/ portTICK_PERIOD_MS);
+      // for(int i = 0; i < (int)(NUM_LEDS2_4); i++){
+      //   leds2[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue; 
+      //   leds2[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   if(!state_brake){
+      //     leds3[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue;
+      //     leds3[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   }
+      // }
+      // leds2.fadeToBlackBy(150);
+      // if(!state_brake){
+      //   leds3.fadeToBlackBy(150);
+      // }
+      // FastLED.show();
+      // vTaskDelay(150/ portTICK_PERIOD_MS);
+      // for(int i = 0; i < (int)(NUM_LEDS2_4); i++){
+      //   leds2[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue; 
+      //   leds2[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //   leds2[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   if(!state_brake){
+      //     leds3[(int)(NUM_LEDS2_4)-i-1] = CRGB::Blue;
+      //     leds3[(int)(NUM_LEDS2_4)+i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3-i] = CRGB::White;
+      //     leds3[(int)(NUM_LEDS2_4)*3+i+1] = CRGB::Blue;
+      //   }
+      // }
+      // FastLED.show();
+      // vTaskDelay(150/ portTICK_PERIOD_MS);
+
+      // 2 section
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[i] = CRGB::Blue;
+        leds[NUM_LEDS - i - 1] = CRGB::White;
+        leds[NUM_LEDS - i - 1].fadeToBlackBy(FADE_STROBE);
+        if(i < NUM_LEDS2_2){
+          leds2[i] = CRGB::Blue;
+          leds2[NUM_LEDS2 - i - 1] = CRGB::White;
+          leds2[NUM_LEDS2 - i - 1].fadeToBlackBy(FADE_STROBE);
+        }
+        if(!state_brake && i < NUM_LEDS3_2){
+          leds3[i] = CRGB::Blue;
+          leds3[NUM_LEDS3 - i - 1] = CRGB::White;
+          leds3[NUM_LEDS3 - i - 1].fadeToBlackBy(FADE_STROBE);
+        }
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[i].fadeToBlackBy(FADE_STROBE);
+        if (i < NUM_LEDS2_2){
+          leds2[i].fadeToBlackBy(FADE_STROBE);
+        }
+        if( i < NUM_LEDS3_2 && !state_brake ){
+          leds3[i].fadeToBlackBy(FADE_STROBE);
+        }
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[i] = CRGB::Blue;
+        if (i < NUM_LEDS2_2){
+          leds2[i] = CRGB::Blue;
+        }
+        if( i < NUM_LEDS3_2 && !state_brake ){
+          leds3[i] = CRGB::Blue;
+        }
+      }
+      
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+      if(hazard_signal_state == OFF){
+        continue;
+      }
+
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[i].fadeToBlackBy(FADE_STROBE);
+        if (i < NUM_LEDS2_2){
+          leds2[i].fadeToBlackBy(FADE_STROBE);
+        }
+        if( i < NUM_LEDS3_2 && !state_brake ){
+          leds3[i].fadeToBlackBy(FADE_STROBE);
+        }
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+
+      // white
+      for (int i = 0; i < NUM_LEDS_2; i++){
+
+        leds[NUM_LEDS - i - 1] = CRGB::White;
+        if(i < NUM_LEDS2_2){
+          leds2[NUM_LEDS2 - i - 1] = CRGB::White;
+        }
+        if(!state_brake && i < NUM_LEDS3_2){
+          leds3[NUM_LEDS3 - i - 1] = CRGB::White;
+        }
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[NUM_LEDS - i - 1].fadeToBlackBy(FADE_STROBE);
+        if(i < NUM_LEDS2_2){
+          leds2[NUM_LEDS2 - i - 1].fadeToBlackBy(FADE_STROBE);
+        }
+        if(!state_brake && i < NUM_LEDS3_2){
+          leds3[NUM_LEDS3 - i - 1].fadeToBlackBy(FADE_STROBE);
+        }
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+
+      if(hazard_signal_state == OFF){
+        continue;
+      }
+
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[NUM_LEDS - i - 1] = CRGB::White;
+        if(i < NUM_LEDS2_2){
+          leds2[NUM_LEDS2 - i - 1] = CRGB::White;
+        }
+        if(!state_brake && i < NUM_LEDS3_2){
+          leds3[NUM_LEDS3 - i - 1] = CRGB::White;
+        }
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[NUM_LEDS - i - 1].fadeToBlackBy(FADE_STROBE);
+        if(i < NUM_LEDS2_2){
+          leds2[NUM_LEDS2 - i - 1].fadeToBlackBy(FADE_STROBE);
+        }
+        if(!state_brake && i < NUM_LEDS3_2){
+          leds3[NUM_LEDS3 - i - 1].fadeToBlackBy(FADE_STROBE);
+        }
+      }
+      
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+
+      // // both
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[i] = CRGB::Blue;
+        leds[NUM_LEDS - i - 1] = CRGB::White;
+        if(i < NUM_LEDS2_2){
+          leds2[i] = CRGB::Blue;
+          leds2[NUM_LEDS2 - i - 1] = CRGB::White;
+        }
+        if(!state_brake && i < NUM_LEDS3_2){
+          leds3[i] = CRGB::Blue;
+          leds3[NUM_LEDS3 - i - 1] = CRGB::White;
+        }
+      }
+
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+
+      leds.fadeToBlackBy(FADE_STROBE);
+      leds2.fadeToBlackBy(FADE_STROBE);
+      if(!state_brake){
+        leds3.fadeToBlackBy(FADE_STROBE);
+      }
+
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+
+      if(hazard_signal_state == OFF){
+        continue;
+      }
+
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[i] = CRGB::Blue;
+        leds[NUM_LEDS - i - 1] = CRGB::White;
+        if(i < NUM_LEDS2_2){
+          leds2[i] = CRGB::Blue;
+          leds2[NUM_LEDS2 - i - 1] = CRGB::White;
+        }
+        if(!state_brake && i < NUM_LEDS3_2){
+          leds3[i] = CRGB::Blue;
+          leds3[NUM_LEDS3 - i - 1] = CRGB::White;
+        }
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+      leds.fadeToBlackBy(FADE_STROBE);
+      leds2.fadeToBlackBy(FADE_STROBE);
+      if(!state_brake){
+        leds3.fadeToBlackBy(FADE_STROBE);
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+
+      // FLIP
+      // Blue
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[i] = CRGB::White;
+        leds[NUM_LEDS - i - 1] = CRGB::Blue;
+        leds[NUM_LEDS - i - 1].fadeToBlackBy(FADE_STROBE);
+        if(i < NUM_LEDS2_2){
+          leds2[i] = CRGB::White;
+          leds2[NUM_LEDS2 - i - 1] = CRGB::Blue;
+          leds2[NUM_LEDS2 - i - 1].fadeToBlackBy(FADE_STROBE);
+        }
+        if(!state_brake && i < NUM_LEDS3_2){
+          leds3[i] = CRGB::White;
+          leds3[NUM_LEDS3 - i - 1] = CRGB::Blue;
+          leds3[NUM_LEDS3 - i - 1].fadeToBlackBy(FADE_STROBE);
+        }
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[i].fadeToBlackBy(FADE_STROBE);
+        if (i < NUM_LEDS2_2){
+          leds2[i].fadeToBlackBy(FADE_STROBE);
+        }
+        if( i < NUM_LEDS3_2 && !state_brake ){
+          leds3[i].fadeToBlackBy(FADE_STROBE);
+        }
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+
+      if(hazard_signal_state == OFF){
+        continue;
+      }
+    
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[i] = CRGB::White;
+        if (i < NUM_LEDS2_2){
+          leds2[i] = CRGB::White;
+        }
+        if( i < NUM_LEDS3_2 && !state_brake ){
+          leds3[i] = CRGB::White;
+        }
+      }
+      
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[i].fadeToBlackBy(FADE_STROBE);
+        if (i < NUM_LEDS2_2){
+          leds2[i].fadeToBlackBy(FADE_STROBE);
+        }
+        if( i < NUM_LEDS3_2 && !state_brake ){
+          leds3[i].fadeToBlackBy(FADE_STROBE);
+        }
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+
+      // white
+      for (int i = 0; i < NUM_LEDS_2; i++){
+
+        leds[NUM_LEDS - i - 1] = CRGB::Blue;
+        if(i < NUM_LEDS2_2){
+          leds2[NUM_LEDS2 - i - 1] = CRGB::Blue;
+        }
+        if(!state_brake && i < NUM_LEDS3_2){
+          leds3[NUM_LEDS3 - i - 1] = CRGB::Blue;
+        }
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+
+      if(hazard_signal_state == OFF){
+        continue;
+      }
+
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[NUM_LEDS - i - 1].fadeToBlackBy(FADE_STROBE);
+        if(i < NUM_LEDS2_2){
+          leds2[NUM_LEDS2 - i - 1].fadeToBlackBy(FADE_STROBE);
+        }
+        if(!state_brake && i < NUM_LEDS3_2){
+          leds3[NUM_LEDS3 - i - 1].fadeToBlackBy(FADE_STROBE);
+        }
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[NUM_LEDS - i - 1] = CRGB::Blue;
+        if(i < NUM_LEDS2_2){
+          leds2[NUM_LEDS2 - i - 1] = CRGB::Blue;
+        }
+        if(!state_brake && i < NUM_LEDS3_2){
+          leds3[NUM_LEDS3 - i - 1] = CRGB::Blue;
+        }
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[NUM_LEDS - i - 1].fadeToBlackBy(FADE_STROBE);
+        if(i < NUM_LEDS2_2){
+          leds2[NUM_LEDS2 - i - 1].fadeToBlackBy(FADE_STROBE);
+        }
+        if(!state_brake && i < NUM_LEDS3_2){
+          leds3[NUM_LEDS3 - i - 1].fadeToBlackBy(FADE_STROBE);
+        }
+      }
+      
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+
+      if(hazard_signal_state == OFF){
+        continue;
+      }
+
+      // // both
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[i] = CRGB::White;
+        leds[NUM_LEDS - i - 1] = CRGB::Blue;
+        if(i < NUM_LEDS2_2){
+          leds2[i] = CRGB::White;
+          leds2[NUM_LEDS2 - i - 1] = CRGB::Blue;
+        }
+        if(!state_brake && i < NUM_LEDS3_2){
+          leds3[i] = CRGB::White;
+          leds3[NUM_LEDS3 - i - 1] = CRGB::Blue;
+        }
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+      leds.fadeToBlackBy(FADE_STROBE);
+      leds2.fadeToBlackBy(FADE_STROBE);
+      if(!state_brake){
+        leds3.fadeToBlackBy(FADE_STROBE);
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+      for (int i = 0; i < NUM_LEDS_2; i++){
+        leds[i] = CRGB::White;
+        leds[NUM_LEDS - i - 1] = CRGB::Blue;
+        if(i < NUM_LEDS2_2){
+          leds2[i] = CRGB::White;
+          leds2[NUM_LEDS2 - i - 1] = CRGB::Blue;
+        }
+        if(!state_brake && i < NUM_LEDS3_2){
+          leds3[i] = CRGB::White;
+          leds3[NUM_LEDS3 - i - 1] = CRGB::Blue;
+        }
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+      leds.fadeToBlackBy(FADE_STROBE);
+      leds2.fadeToBlackBy(FADE_STROBE);
+      if(!state_brake){
+        leds3.fadeToBlackBy(FADE_STROBE);
+      }
+      FastLED.show();
+      vTaskDelay(DELAY_STROBE / portTICK_PERIOD_MS);
+      
+    }    
+    else if(hazard_signal_state == BREATHE){
+      // animating = true;
+
+      for (int i = 0; i < smoothness; i++)
+      {
+        int val = (1.0 - myabs((2.0 * (i / smoothness)) - 1.0))*range;
+        leds.fill_solid(CRGB::Blue);
+        leds.fadeToBlackBy(range - val);
+        leds2.fill_solid(CRGB::Blue);
+        leds2.fadeToBlackBy(range - val);
+        for(int j = 0 ; j < NUM_LEDS_2; j++){
+          leds[j] = CRGB::White;
+          leds[j].fadeToBlackBy(range);
+          if(j < NUM_LEDS2_2){
+            leds2[j] = CRGB::White;
+            leds2[j].fadeToBlackBy(range);
+          }
+          if(j < NUM_LEDS3_2 && !state_brake){
+            leds3[j] = CRGB::White;
+            leds3[j].fadeToBlackBy(range);
+          }
+        }
+        FastLED.show();
+        vTaskDelay(20 / portTICK_PERIOD_MS);
+      }
+      vTaskDelay(20 / portTICK_PERIOD_MS);
+      printf("second loop\n");
+      for (int i = 0; i < smoothness; i++){
+        int val = (1.0 - myabs(((2.0 * (i / smoothness))) - 1.0))*range;
+        leds.fill_solid(CRGB::White);
+        leds.fadeToBlackBy(range - val);
+        leds2.fill_solid(CRGB::White);
+        leds2.fadeToBlackBy(range - val);
+        for(int j = 0 ; j < NUM_LEDS_2; j++){
+          leds[NUM_LEDS - j - 1 ] = CRGB::Blue;
+          leds[NUM_LEDS - j - 1].fadeToBlackBy(range);
+          if(j < NUM_LEDS2_2){
+            leds2[NUM_LEDS2 - j - 1] = CRGB::Blue;
+            leds2[NUM_LEDS2 - j - 1].fadeToBlackBy(range);
+          }
+          if(j < NUM_LEDS3_2 && !state_brake){
+            leds3[NUM_LEDS3 - j - 1] = CRGB::Blue;
+            leds3[NUM_LEDS3 - j - 1].fadeToBlackBy(range);
+          }
+        }
+          FastLED.show();
+          vTaskDelay(20 / portTICK_PERIOD_MS);
+      }
+        // animating = false;
+        vTaskDelay(20 / portTICK_PERIOD_MS);
+    }
+    else if(hazard_signal_state == OFF && state_DRL == OFF){
+      if(state_l == OFF && state_r == OFF){
+        // printf("OFF\n");
+        // vTaskDelay(150/portTICK_PERIOD_MS);
+        leds.fill_solid(CRGB::Black);
+        leds2.fill_solid(CRGB::Black);
+        if(!state_brake){
+          leds3.fill_solid(CRGB::Black);
+        }
+        FastLED.show();
+      }
+      
+      // if
+      // if(!animating){
+      //   leds.fill_solid(CRGB::Black);
+      //   leds2.fill_solid(CRGB::Black);
+        
+      // }
+      // if(!state_brake){
+      //   leds3.fill_solid(CRGB::Black);
+      // }
+    }
+    else if(hazard_signal_state == OFF && state_DRL == ON){
+      if(state_l == ON){
+        // for (int i = 0; i < NUM_LEDS_2; i++){
+        //   leds[NUM_LEDS_2 + i] = CRGB::White;
+        //   if( i < NUM_LEDS2_2){
+        //     leds2[NUM_LEDS2_2 + i] = CRGB::White;
+        //   }
+        //   if( i < NUM_LEDS3_2){
+        //     if(!state_brake){
+        //       leds3[NUM_LEDS3_2 + i] = CRGB::White;
+        //     }
+        //   }
+        // }
+      }
+      else if(state_r == ON){
+        // for (int i = 0; i < NUM_LEDS_2; i++){
+        //   leds[i] = CRGB::White;
+        //   if( i < NUM_LEDS2_2){
+        //     leds2[i] = CRGB::White;
+        //     if(!state_brake){
+        //       leds3[i] = CRGB::White;
+        //     }
+        //   }
+        // }
+      }
+      else{
+        leds.fill_solid(CRGB::White);
+        leds2.fill_solid(CRGB::White);
+        if(!state_brake){
+          leds3.fill_solid(CRGB::White);
+        }
+        FastLED.show();
+      }
+    }
+    printf("time: %ld\n", pdTICKS_TO_MS(xTaskGetTickCount()-now));
+    vTaskDelay(20 / portTICK_PERIOD_MS);
+    
+  }
+  vTaskDelete(NULL);
+}
+
+void myDoubleClickFunction(){
+  printf("Double Click\n");
+  if (hazard_signal_state != BREATHE){
+    hazard_signal_state = BREATHE;
+  }
+  else{
+    hazard_signal_state = OFF;
+    leds.fill_solid(CRGB::Black);
+    leds2.fill_solid(CRGB::Black);
+    leds3.fill_solid(CRGB::Black);
+    // FastLED.show();
+  }
+}
+ 
+void myMultiClickFunction(){
+  printf("Triple Click\n");
+  if (hazard_signal_state != STROBE){
+    hazard_signal_state = STROBE;
+  }
+  else{
+    vTaskDelay(1500 / portTICK_PERIOD_MS);
+    hazard_signal_state = OFF;
+    leds.fill_solid(CRGB::Black);
+    leds2.fill_solid(CRGB::Black);
+    leds3.fill_solid(CRGB::Black);
+    // FastLED.show();
+  }
+}
+void myLongPressStart(){
+  printf("Long Press Start\n");
+  hazard_signal_state = ON;
+}
+
+void myLongPressStop(){
+  vTaskDelay(500 / portTICK_PERIOD_MS);
+  printf("Long Press Stop\n");
+  hazard_signal_state = OFF;
+}
+
+void signalStartl(){
+  printf("Long Press Start\n");
+  state_l = ON;
+}
+
+void signalStopl(){
+  vTaskDelay(1500 / portTICK_PERIOD_MS);
+  printf("Long Press Stop\n");
+  state_l = OFF;
+}
+void signalStartr(){
+
+  printf("Long Press Start\n");
+  state_r = ON;
+}
+
+void signalStopr(){
+  vTaskDelay(1500 / portTICK_PERIOD_MS);
+  printf("Long Press Stop\n");
+  state_r = OFF;
+}
+
+void brake(){
+  printf("Brake\n");
+  state_brake = true;
+  leds3.fill_solid(CRGB::Red);
+  // FastLED.show();
+}
+
+void brakeRelease(){
+  printf("Brake Release\n");
+  // leds3.fill_solid(CRGB::Black);
+  state_brake = false;
+  if(hazard_signal_state == OFF && state_l == OFF && state_r == OFF){
+    leds3.fill_solid(CRGB::Black);
+  }
+  // FastLED.show();
+  // xSemaphoreGive(sem_leds3);
+}
+
+void byeLight(){
+  animating = true;
+  CRGBArray<4> brightness;
+  brightness[0] = CRGB::White;
+  brightness[1] = brightness[0].fadeToBlackBy(64);
+  brightness[2] = brightness[0].fadeToBlackBy(128);
+  brightness[3] = brightness[0].fadeToBlackBy(192);
+
+  for(int i = 1; i < 4; i++){
+    for(int j = 0; j < NUM_LEDS_2; j++){
+      leds[NUM_LEDS_2 - j-1] = brightness[i];
+      leds[NUM_LEDS_2 + j] = brightness[i];
+      if(j < NUM_LEDS2_2){
+        leds2[NUM_LEDS2_2 - j-1] = brightness[i];
+        leds2[NUM_LEDS2_2 + j] = brightness[i];
+        // leds3[NUM_LEDS2_2 - j-1] = brightness[i];
+        // leds3[NUM_LEDS2_2 + j] = brightness[i];
+      }
+      if(j < NUM_LEDS3_2){
+        leds3[NUM_LEDS3_2 - j-1] = brightness[i];
+        leds3[NUM_LEDS3_2 + j] = brightness[i];
+      }
+      FastLED.show();
+      vTaskDelay(ByeSpeed / portTICK_PERIOD_MS);
+    }
+  }
+  leds.fill_solid(CRGB::Black);
+  leds2.fill_solid(CRGB::Black);
+  animating = false;
+}
+
+
+void DRLStart(){
+
+  printf("DRL Start\n");
+  welcomeLightScanning();
+  printf("DRL animate finish\n");
+  state_DRL = ON;
+
+}
+
+void DRLStop(){
+  printf("DRL Stop\n");
+  state_DRL = OFF;
+  byeLight();
+}
+
+void init_button(){
+  // button.attachClick(myClickFunction);
+  button.setClickTicks(600);
+  button.setPressTicks(400);
+  button2.setPressTicks(350);
+  button3.setPressTicks(350);
+  button_DRL.setPressTicks(500);
+  button_brake.setPressTicks(50);
+  // link the doubleclick function to be called on a doubleclick event.   
+  button.attachDoubleClick(myDoubleClickFunction);
+  button.attachMultiClick(myMultiClickFunction);
+  button.attachLongPressStart(myLongPressStart);
+  button.attachLongPressStop(myLongPressStop);
+  button2.attachLongPressStart(signalStartl);
+  button2.attachLongPressStop(signalStopl);
+  button3.attachLongPressStart(signalStartr);
+  button3.attachLongPressStop(signalStopr);
+  button_DRL.attachLongPressStart(DRLStart);
+  button_DRL.attachLongPressStop(DRLStop);
+  button_brake.attachDuringLongPress(brake);
+  button_brake.attachLongPressStop(brakeRelease);
+}
+
+
+void updateLeds(void *args){
+  static TickType_t lasttime = 0;
+  for (;;){
+    vTaskDelayUntil(&lasttime, (1000/FPS) / portTICK_PERIOD_MS);
+    if(animating)
+      continue;
+    // printf("showing\n");
+    // if(hazard_signal_state == OFF || hazard_signal_state == ON){
+    FastLED.show();
+    // }
+  }
+  vTaskDelete(NULL);
+}
+void setup()
+{
+
+  // put your setup code here, to run once:
+  pinMode(DATA_PIN, OUTPUT);
+  pinMode(DATA_PIN_SIGNAL, OUTPUT);
+  pinMode(DATA_PIN_BACK, OUTPUT);
+  // pinMode(14, INPUT_PULLUP);
+  // pinMode(18, INPUT_PULLUP);
+  // pinMode(13, INPUT_PULLUP);
+  // pinMode(3, INPUT);
+  pinMode(BRAKE_PIN, INPUT_PULLUP);
+
+  // pinMode(DATA_PIN_BACK, OUTPUT);
+
+  Serial.begin(115200);
+  FastLED.addLeds<WS2812, DATA_PIN, GRB>(leds, NUM_LEDS);
+  FastLED.addLeds<WS2812, DATA_PIN_SIGNAL, GRB>(leds2, NUM_LEDS2);
+  FastLED.addLeds<WS2812, DATA_PIN_BACK, GRB>(leds3, NUM_LEDS2);
+  set_max_power_in_volts_and_milliamps(5, 1000);
+  
+  leds.fill_solid(CRGB::Black);
+  leds2.fill_solid(CRGB::Black);
+  leds3.fill_solid(CRGB::Black);
+  init_button();
+  printf("button initialized\n");
+  delay(500);
+  // xTaskCreate(DRL, "DRL", 2048, NULL, 1, NULL);
+  xTaskCreatePinnedToCore(signalLeft, "signalLeft", 2048, NULL, 1, &signalLeftTask,0);
+  xTaskCreatePinnedToCore(signalRight, "signalRight", 2048, NULL, 1, &signalLeftTask,0);
+  xTaskCreatePinnedToCore(hazardSignal, "hazardSignal", 2048, NULL, 2, &hazardSignalTask,0);
+  xTaskCreatePinnedToCore(updateLeds, "updateLeds", 2048, NULL, 2, &updateLedsTask,0);
+  perfmon_start();
+}
+
+int interval = 500;
+int now = millis();
+
+String state[4] = {"OFF", "ON", "BREATHE", "STROBE"};
+
+void loop()
+{
+  if(millis()-now > interval){
+    printf("state: %s \n signalleft: %s \n signalright: %s\n", state[hazard_signal_state].c_str(), state[state_l].c_str(), state[state_r].c_str());
+    now = millis();
+  }
+  
+  button.tick();
+  button2.tick();
+  button3.tick();
+  button_DRL.tick();
+  button_brake.tick();
+  vTaskDelay(30 / portTICK_PERIOD_MS);
+}
